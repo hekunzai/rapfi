@@ -28,19 +28,26 @@
 
 namespace Evaluation {
 
+/// Default empty extra args.
+struct EmptyExtraArgs
+{
+    bool operator==(const EmptyExtraArgs &) const { return true; }
+};
+
 /// Base class for a weight loader.
 /// @tparam WeightType The type of evaluator weight.
-template <typename WeightType_>
+template <typename WeightType_, typename ExtraArgs_ = EmptyExtraArgs>
 struct WeightLoader
 {
     typedef WeightType_ WeightType;
+    typedef ExtraArgs_  ExtraArgs;
 
-    /// Load and construct a weight type from the given input stream.
+    /// Load and construct a weight type from the given input stream and extra args.
     /// @return Weight pointer if load succeeded, otherwise nullptr.
-    virtual std::unique_ptr<WeightType> load(std::istream &is) = 0;
+    virtual std::unique_ptr<WeightType> load(std::istream &is, ExtraArgs args) = 0;
 
     /// Whether this weight loader needs a binary stream.
-    /// Default behaviour is true.
+    /// Default behaviour is true. Only used when loading from istream.
     virtual bool needsBinaryStream() const { return true; }
 };
 
@@ -48,7 +55,8 @@ struct WeightLoader
 template <typename WeightType>
 struct BinaryPODWeightLoader : WeightLoader<WeightType>
 {
-    std::unique_ptr<WeightType> load(std::istream &is) override
+    std::unique_ptr<WeightType> load(std::istream                                &is,
+                                     typename WeightLoader<WeightType>::ExtraArgs args) override
     {
         auto weight = std::make_unique<WeightType>();
         is.read(reinterpret_cast<char *>(weight.get()), sizeof(WeightType));
@@ -81,7 +89,8 @@ struct StandardHeaderParserWarpper : BaseLoader
         headerValidator = std::move(validator);
     }
 
-    std::unique_ptr<typename BaseLoader::WeightType> load(std::istream &inputStream) override
+    std::unique_ptr<typename BaseLoader::WeightType>
+    load(std::istream &inputStream, typename BaseLoader::ExtraArgs args) override
     {
         struct RawHeaderData
         {
@@ -113,7 +122,7 @@ struct StandardHeaderParserWarpper : BaseLoader
             inputStream.ignore(headerData.desc_len);
         }
 
-        return BaseLoader::load(inputStream);
+        return BaseLoader::load(inputStream, args);
     }
 
 private:
@@ -154,13 +163,14 @@ struct CompressedWrapper : BaseLoader
 
     void setEntryName(std::string name) { entryName = name; }
 
-    std::unique_ptr<typename BaseLoader::WeightType> load(std::istream &rawInputStream) override
+    std::unique_ptr<typename BaseLoader::WeightType>
+    load(std::istream &rawInputStream, typename BaseLoader::ExtraArgs args) override
     {
         Compressor    compressor(rawInputStream, compressType);
         std::istream *is = compressor.openInputStream(entryName);
         if (!is)
             return nullptr;
-        return BaseLoader::load(*is);
+        return BaseLoader::load(*is, args);
     }
 
 private:
@@ -168,21 +178,22 @@ private:
     std::string      entryName;
 };
 
-/// @brief WeightRegistry is the global manager for loaded weights.
+/// WeightRegistry is the global manager for loaded weights.
 /// Usually each evaluator loads weight from file on its own, however in most case all
 /// evaluator loads the same weight and it is very memory comsuming to have multiple
 /// weight instance in memory. Weight Registry helps to reuse loaded weight when it is
 /// applicable, by holding a pool of all loaded weight.
-template <typename WeightType>
+template <typename WeightType, typename ExtraWeightArgs = EmptyExtraArgs>
 class WeightRegistry
 {
 public:
-    using Loader = WeightLoader<WeightType>;
+    using Loader = WeightLoader<WeightType, ExtraWeightArgs>;
 
-    /// Loads weight from the given file path, using the loader.
+    /// Loads weight from the given file path and extra args, using the loader.
     /// If the weight already exists in registry, it reuse the loaded weight.
     /// @return Weight pointer, or nullptr if load failed.
-    WeightType *loadWeightFromFile(std::filesystem::path filepath, Loader &loader);
+    WeightType *
+    loadWeightFromFile(Loader &loader, std::filesystem::path filepath, ExtraWeightArgs args = {});
 
     /// Unloads a loaded weight.
     void unloadWeight(WeightType *weight);
@@ -190,9 +201,10 @@ public:
 private:
     struct LoadedWeight
     {
-        std::filesystem::path       filepath;
         std::unique_ptr<WeightType> weight;
         size_t                      refCount;
+        std::filesystem::path       filepath;
+        ExtraWeightArgs             extraArgs;
     };
 
     std::vector<LoadedWeight> pool;
@@ -201,16 +213,17 @@ private:
 
 }  // namespace Evaluation
 
-template <typename WeightType>
-inline WeightType *
-Evaluation::WeightRegistry<WeightType>::loadWeightFromFile(std::filesystem::path filepath,
-                                                           Loader               &loader)
+template <typename WeightType, typename ExtraWeightArgs>
+inline WeightType *Evaluation::WeightRegistry<WeightType, ExtraWeightArgs>::loadWeightFromFile(
+    Loader               &loader,
+    std::filesystem::path filepath,
+    ExtraWeightArgs       args)
 {
     std::lock_guard<std::mutex> lock(poolMutex);
 
-    // Find weights in loaded weight pool
+    // Find weight to reuse in loaded weight pool
     for (auto &w : pool) {
-        if (w.filepath == filepath) {
+        if (w.filepath == filepath && w.extraArgs == args) {
             w.refCount++;
             return w.weight.get();
         }
@@ -221,24 +234,24 @@ Evaluation::WeightRegistry<WeightType>::loadWeightFromFile(std::filesystem::path
     if (loader.needsBinaryStream())
         mode = mode | std::ios::binary;
     std::ifstream fileStream(filepath, mode);
-
     if (!fileStream.is_open())
         return nullptr;
 
     // Load weight using weight loader
-    auto weight = loader.load(fileStream);
+    auto weight = loader.load(fileStream, args);
 
     // If load succeeded, add to pool
     if (weight) {
-        pool.push_back({filepath, std::move(weight), 1});
+        pool.push_back({std::move(weight), 1, filepath, args});
         return pool.back().weight.get();
     }
     else
         return nullptr;
 }
 
-template <typename WeightType>
-inline void Evaluation::WeightRegistry<WeightType>::unloadWeight(WeightType *weight)
+template <typename WeightType, typename ExtraWeightArgs>
+inline void
+Evaluation::WeightRegistry<WeightType, ExtraWeightArgs>::unloadWeight(WeightType *weight)
 {
     std::lock_guard<std::mutex> lock(poolMutex);
 

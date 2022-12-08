@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 #include "mix7nnue.h"
 
@@ -522,7 +522,7 @@ Mix7Evaluator::Mix7Evaluator(int                   boardSize,
              std::make_pair(WHITE, whiteWeightPath),
          }) {
         currentWeightPath  = weightPath;
-        weight[weightSide] = Mix7WeightRegistry.loadWeightFromFile(weightPath, loader);
+        weight[weightSide] = Mix7WeightRegistry.loadWeightFromFile(loader, weightPath);
         if (!weight[weightSide])
             throw std::runtime_error("failed to load nnue weight from " + weightPath.string());
     }

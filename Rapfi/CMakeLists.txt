@@ -16,6 +16,10 @@ option(USE_SSE  "Enable SSE-SSE4.2 instruction" ON)
 option(USE_AVX  "Enable AVX instruction" ON)
 option(USE_AVX2 "Enable AVX2/FMA instruction" ON)
 option(USE_BMI2 "Enable BMI2 instruction" OFF)
+option(ONNXRUNTIME_EVALUATOR "Enable onnx-runtime evaluator" OFF)
+option(ONNXRUNTIME_USE_CUDA "Build onnx-runtime with CUDA support" OFF)
+option(ONNXRUNTIME_USE_TENSORRT "Build onnx-runtime with TensorRT support" OFF)
+set(ONNXRUNTIME_ROOTDIR "" CACHE STRING "Root directory of onnxruntime")
 
 option(ENABLE_LTO "Enable link time optimization" OFF)
 option(FORCE_ASSERTION "Enable force assertion for all build type" OFF)
@@ -214,6 +218,35 @@ if(EMSCRIPTEN)
 
     set_target_properties(rapfi PROPERTIES LINK_FLAGS ${EMCC_FLAGS})
 
+endif()
+
+#==========================================================
+# Onnx Runtime linking
+
+if(ONNXRUNTIME_EVALUATOR)
+    if(NOT ONNXRUNTIME_ROOTDIR)
+	    message(STATUS "Using default onnxruntime root directory.")
+        if(WIN32)
+            set(ONNXRUNTIME_ROOTDIR "C:/Program Files (x86)/onnxruntime")
+        else()
+            include_directories("/usr/local/include/onnxruntime")
+        endif()
+    endif()
+
+	target_include_directories(rapfi PRIVATE "${ONNXRUNTIME_ROOTDIR}/include")
+	target_link_directories(rapfi PRIVATE "${ONNXRUNTIME_ROOTDIR}/lib")
+    target_sources(rapfi PRIVATE
+		eval/onnxevaluator.cpp
+		eval/onnxevaluator.h
+	)
+    target_link_libraries(rapfi PRIVATE onnxruntime)
+
+    if(ONNXRUNTIME_USE_CUDA)
+	    target_compile_definitions(rapfi PRIVATE USE_CUDA)
+    endif()
+    if(ONNXRUNTIME_USE_TENSORRT)
+        target_compile_definitions(rapfi PRIVATE USE_TENSORRT)
+    endif()
 endif()
 
 #==========================================================

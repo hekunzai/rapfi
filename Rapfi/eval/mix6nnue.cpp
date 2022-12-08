@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 /*
     Mix6 NNUE Architecture is from @hzyhhzy:
@@ -430,7 +430,7 @@ Mix6Evaluator::Mix6Evaluator(int                   boardSize,
              std::make_pair(WHITE, whiteWeightPath),
          }) {
         currentWeightPath  = weightPath;
-        weight[weightSide] = Mix6WeightRegistry.loadWeightFromFile(weightPath, loader);
+        weight[weightSide] = Mix6WeightRegistry.loadWeightFromFile(loader, weightPath);
         if (!weight[weightSide])
             throw std::runtime_error("failed to load nnue weight from " + pathToString(weightPath));
     }

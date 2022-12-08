@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 #include "searchoutput.h"
 
@@ -164,10 +164,11 @@ void SearchPrinter::printSearchEnds(MainSearchThread  &th,
 {
     if (Config::MessageMode == MsgMode::NORMAL || Config::MessageMode == MsgMode::BRIEF) {
         uint64_t nodes = th.threads.nodesSearched();
-        uint64_t speed = nodes / std::max(tc.elapsed(), (Time)1);
+        uint64_t speed = nodes * 1000 / std::max(tc.elapsed(), (Time)1);
+        bool     knps  = speed >= 100000;
 
-        MESSAGEL("Speed " << speed << " | Depth " << rootDepth << "-"
-                          << bestThread.rootMoves[0].selDepth << " | Eval "
+        MESSAGEL("Speed " << (knps ? speed / 1000 : speed) << (knps ? "K" : "") << " | Depth "
+                          << rootDepth << "-" << bestThread.rootMoves[0].selDepth << " | Eval "
                           << bestThread.rootMoves[0].value << " | Node " << nodesText(nodes)
                           << " | Time " << timeText(tc.elapsed()));
 

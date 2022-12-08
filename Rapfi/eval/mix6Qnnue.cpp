@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 #include "mix6Qnnue.h"
 
@@ -65,7 +65,7 @@ static WeightRegistry<Mix6QWeight> Mix6v2WeightRegistry;
 
 struct Mix6QWeightLoader : WeightLoader<Mix6QWeight>
 {
-    std::unique_ptr<Mix6QWeight> load(std::istream &in) override
+    std::unique_ptr<Mix6QWeight> load(std::istream &in, ExtraArgs args) override
     {
         auto weight = std::make_unique<Mix6QWeight>();
 
@@ -632,7 +632,7 @@ Mix6QEvaluator::Mix6QEvaluator(int                   boardSize,
         MESSAGEL("mix6qnnue: load weight from " << weightPath);
         return true;
     });
-    weight = Mix6v2WeightRegistry.loadWeightFromFile(weightPath, loader);
+    weight = Mix6v2WeightRegistry.loadWeightFromFile(loader, weightPath);
     if (!weight)
         throw std::runtime_error("failed to load mix6v2nnue weight from " + weightPath.string());
 

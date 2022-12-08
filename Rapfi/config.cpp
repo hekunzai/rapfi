@@ -28,6 +28,7 @@
 #include "eval/mix6nnue.h"
 #include "eval/mix7nnue.h"
 #include "eval/nnuev2.h"
+#include "eval/onnxevaluator.h"
 #include "game/pattern.h"
 #include "search/hashtable.h"
 #include "search/searchthread.h"
@@ -635,6 +636,21 @@ void Config::readEvaluator(const cpptoml::table &t)
             },
             true));
     }
+    else if (*evaluatorType == "onnx") {
+        std::string device = t.get_as<std::string>("device").value_or("");
+
+        Search::Threads.setupEvaluator(warpEvaluatorMaker(
+            [=](int                   boardSize,
+                Rule                  rule,
+                std::filesystem::path weightPath,
+                const cpptoml::table &weightCfg) {
+                return std::make_unique<Evaluation::onnx::OnnxEvaluator>(boardSize,
+                                                                         rule,
+                                                                         weightPath,
+                                                                         device);
+            },
+            true));
+    }
     else {
         throw std::runtime_error("unsupported evaluator type");
     }
@@ -661,7 +677,7 @@ void Config::readDatabase(const cpptoml::table &t)
     DatabaseCacheSize      = t.get_as<size_t>("cache_size").value_or(DatabaseCacheSize);
     DatabaseRecordCacheSize =
         t.get_as<size_t>("record_cache_size").value_or(DatabaseRecordCacheSize);
-    DatabaseMaker            = nullptr;
+    DatabaseMaker = nullptr;
 
     if (DatabaseType == "yixindb") {
         if (DatabaseURL.empty())
@@ -769,7 +785,7 @@ void Config::readDatabase(const cpptoml::table &t)
         DatabaseLibWhiteLoseMark = t.get_as<std::string>("white_lose_mark").value_or("c")[0];
         DatabaseLibIgnoreComment = t.get_as<bool>("ignore_comment").value_or(false);
     }
-    
+
     DatabaseReadonlyMode = t.get_as<bool>("enable_by_default").value_or(false);
 
     if (DatabaseDefaultEnabled)

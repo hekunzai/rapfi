@@ -14,7 +14,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 /* NNUEv2 Reference: https://github.com/hzyhhzy/gomoku_nnue
  *   Training:
@@ -58,7 +58,7 @@ static Evaluation::WeightRegistry<Weight> NNUEv2WeightRegistry;
 
 struct TextWeightLoader : WeightLoader<Weight>
 {
-    std::unique_ptr<Weight> load(std::istream &in)
+    std::unique_ptr<Weight> load(std::istream &in, ExtraArgs args)
     {
         auto w = std::make_unique<Weight>();
 
@@ -858,8 +858,8 @@ NNUEv2Evaluator::NNUEv2Evaluator(int                   boardSize,
             currentWeightPath = weightPath;
 
         weight[weightSide] = useTextLoader
-                                 ? NNUEv2WeightRegistry.loadWeightFromFile(weightPath, textLoader)
-                                 : NNUEv2WeightRegistry.loadWeightFromFile(weightPath, binLoader);
+                                 ? NNUEv2WeightRegistry.loadWeightFromFile(textLoader, weightPath)
+                                 : NNUEv2WeightRegistry.loadWeightFromFile(binLoader, weightPath);
         if (!weight[weightSide])
             throw std::runtime_error("failed to load nnue weight from " + weightPath.string());
     }
