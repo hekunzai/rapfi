@@ -352,20 +352,6 @@ void Mix8Accumulator::move(const Mix8Weight &w, Color pieceColor, int x, int y)
     typedef Batch<FeatureDWConvDim, int16_t> ConvB;
     typedef Batch<FeatureDim, int32_t>       VSumB;
 
-    // Load value sum
-    I32Op::R vSumGlobal[VSumB::NumBatch];
-    I32Op::R vSumGroup[ValueSumType::NGroup][ValueSumType::NGroup][VSumB::NumBatch];
-    {
-        auto &valueSum = valueSumTable[currentVersion];
-        for (int b = 0; b < VSumB::NumBatch; b++)
-            vSumGlobal[b] = I32LS::load(valueSum.global.data() + b * VSumB::RegWidth);
-        for (int i = 0; i < ValueSumType::NGroup; i++)
-            for (int j = 0; j < ValueSumType::NGroup; j++)
-                for (int b = 0; b < VSumB::NumBatch; b++)
-                    vSumGroup[i][j][b] =
-                        I32LS::load(valueSum.group[i][j].data() + b * VSumB::RegWidth);
-    }
-
     // Subtract value feature sum
     int x0            = std::max(x - 6 + 1, 1);
     int y0            = std::max(y - 6 + 1, 1);
@@ -374,28 +360,11 @@ void Mix8Accumulator::move(const Mix8Weight &w, Color pieceColor, int x, int y)
     int newMapConvIdx = changeNum.outer;
     for (int yi = y0, outerIdxBase = y0 * outerBoardSize; yi <= y1;
          yi++, outerIdxBase += outerBoardSize) {
-        int i = groupIndex[yi - 1];
         for (int xi = x0; xi <= x1; xi++) {
-            int outerIdx = xi + outerIdxBase;
-            int j        = groupIndex[xi - 1];
-
-            // Get mapConv index of current version at this point
-            int oldMapConvIdx = versionOuterIndexTable[outerVersionIdxBase + outerIdx];
+            int outerIdx                                           = xi + outerIdxBase;
             versionOuterIndexTable[outerVersionIdxBase + outerIdx] = newMapConvIdx;
-
-            for (int b = 0; b < ConvB::NumBatch; b++) {
-                auto convF = I16LS::load(mapConv[oldMapConvIdx].data() + b * ConvB::RegWidth);
-                I16LS::store(mapConv[newMapConvIdx].data() + b * ConvB::RegWidth, convF);
-                convF         = I16Op::max(convF, I16Op::setzero());  // relu
-                auto [v0, v1] = Convert<int16_t, int32_t>::convert(convF);
-
-                const int offset            = 2 * b;
-                vSumGlobal[offset + 0]      = I32Op::sub(vSumGlobal[offset + 0], v0);
-                vSumGlobal[offset + 1]      = I32Op::sub(vSumGlobal[offset + 1], v1);
-                vSumGroup[i][j][offset + 0] = I32Op::sub(vSumGroup[i][j][offset + 0], v0);
-                vSumGroup[i][j][offset + 1] = I32Op::sub(vSumGroup[i][j][offset + 1], v1);
-            }
-
+            for (int b = 0; b < ConvB::NumBatch; b++)
+                I16LS::store(mapConv[newMapConvIdx].data() + b * ConvB::RegWidth, I16Op::setzero());
             newMapConvIdx++;
         }
     }
@@ -439,6 +408,16 @@ void Mix8Accumulator::move(const Mix8Weight &w, Color pieceColor, int x, int y)
             versionInnerIndexTable[innerVersionIdxBase + innerIdx] = newMapIdx++;
         }
     }
+
+    // Init value sum accumulator
+    I32Op::R vSumGlobal[VSumB::NumBatch];
+    I32Op::R vSumGroup[ValueSumType::NGroup][ValueSumType::NGroup][VSumB::NumBatch];
+    for (int b = 0; b < VSumB::NumBatch; b++)
+        vSumGlobal[b] = I32Op::setzero();
+    for (int i = 0; i < ValueSumType::NGroup; i++)
+        for (int j = 0; j < ValueSumType::NGroup; j++)
+            for (int b = 0; b < VSumB::NumBatch; b++)
+                vSumGroup[i][j][b] = I32Op::setzero();
 
     // Incremental update feature sum
     for (int i = 0; i < changeCount; i++) {
@@ -489,17 +468,15 @@ void Mix8Accumulator::move(const Mix8Weight &w, Color pieceColor, int x, int y)
         for (int b = ConvB::NumBatch; b < FeatB::NumBatch; b++) {
             auto [oldv0, oldv1] = Convert<int16_t, int32_t>::convert(oldFeats[b]);
             auto [newv0, newv1] = Convert<int16_t, int32_t>::convert(newFeats[b]);
+            auto deltav0        = I32Op::sub(newv0, oldv0);
+            auto deltav1        = I32Op::sub(newv1, oldv1);
 
-            auto addToAccumulator =
-                [b, ov0 = oldv0, ov1 = oldv1, nv0 = newv0, nv1 = newv1](auto &vSum) {
-                    const int offset = 2 * b;
-                    vSum[offset + 0] = I32Op::sub(vSum[offset + 0], ov0);
-                    vSum[offset + 1] = I32Op::sub(vSum[offset + 1], ov1);
-                    vSum[offset + 0] = I32Op::add(vSum[offset + 0], nv0);
-                    vSum[offset + 1] = I32Op::add(vSum[offset + 1], nv1);
-                };
-            addToAccumulator(vSumGlobal);
-            addToAccumulator(vSumGroup[groupIndex[c.y]][groupIndex[c.x]]);
+            const int offset       = 2 * b;
+            vSumGlobal[offset + 0] = I32Op::add(vSumGlobal[offset + 0], deltav0);
+            vSumGlobal[offset + 1] = I32Op::add(vSumGlobal[offset + 1], deltav1);
+            auto &vGroup           = vSumGroup[groupIndex[c.y]][groupIndex[c.x]];
+            vGroup[offset + 0]     = I32Op::add(vGroup[offset + 0], deltav0);
+            vGroup[offset + 1]     = I32Op::add(vGroup[offset + 1], deltav1);
         }
     }
 
@@ -509,12 +486,18 @@ void Mix8Accumulator::move(const Mix8Weight &w, Color pieceColor, int x, int y)
          yi++, outerIdxBase += outerBoardSize) {
         int i = groupIndex[yi - 1];
         for (int xi = x0; xi <= x1; xi++) {
-            int outerIdx = xi + outerIdxBase;
-            int j        = groupIndex[xi - 1];
+            int j             = groupIndex[xi - 1];
+            int outerIdx      = xi + outerIdxBase;
+            int oldMapConvIdx = versionOuterIndexTable[outerVersionIdxBasePrev + outerIdx];
             for (int b = 0; b < ConvB::NumBatch; b++) {
-                auto convF    = I16LS::load(mapConv[newMapConvIdx].data() + b * ConvB::RegWidth);
-                convF         = I16Op::max(convF, I16Op::setzero());  // relu
-                auto [v0, v1] = Convert<int16_t, int32_t>::convert(convF);
+                auto oldConvF   = I16LS::load(mapConv[oldMapConvIdx].data() + b * ConvB::RegWidth);
+                auto deltaConvF = I16LS::load(mapConv[newMapConvIdx].data() + b * ConvB::RegWidth);
+                auto newConvF   = I16Op::add(oldConvF, deltaConvF);
+                I16LS::store(mapConv[newMapConvIdx].data() + b * ConvB::RegWidth, newConvF);
+                oldConvF      = I16Op::max(oldConvF, I16Op::setzero());  // relu
+                newConvF      = I16Op::max(newConvF, I16Op::setzero());  // relu
+                auto deltaF   = I16Op::sub(newConvF, oldConvF);
+                auto [v0, v1] = Convert<int16_t, int32_t>::convert(deltaF);
 
                 const int offset            = 2 * b;
                 vSumGlobal[offset + 0]      = I32Op::add(vSumGlobal[offset + 0], v0);
@@ -531,16 +514,20 @@ void Mix8Accumulator::move(const Mix8Weight &w, Color pieceColor, int x, int y)
     versionChangeNumTable[currentVersion] = {uint16_t(newMapIdx), uint16_t(newMapConvIdx)};
 
     // Store value sum
-    {
-        auto &valueSum = valueSumTable[currentVersion];
-        for (int b = 0; b < VSumB::NumBatch; b++)
-            I32LS::store(valueSum.global.data() + b * VSumB::RegWidth, vSumGlobal[b]);
-        for (int i = 0; i < ValueSumType::NGroup; i++)
-            for (int j = 0; j < ValueSumType::NGroup; j++)
-                for (int b = 0; b < VSumB::NumBatch; b++)
-                    I32LS::store(valueSum.group[i][j].data() + b * VSumB::RegWidth,
-                                 vSumGroup[i][j][b]);
+    auto &valueSumOld = valueSumTable[currentVersion - 1];
+    auto &valueSumNew = valueSumTable[currentVersion];
+    for (int b = 0; b < VSumB::NumBatch; b++) {
+        auto vOld = I32LS::load(valueSumOld.global.data() + b * VSumB::RegWidth);
+        auto vNew = I32Op::add(vOld, vSumGlobal[b]);
+        I32LS::store(valueSumNew.global.data() + b * VSumB::RegWidth, vNew);
     }
+    for (int i = 0; i < ValueSumType::NGroup; i++)
+        for (int j = 0; j < ValueSumType::NGroup; j++)
+            for (int b = 0; b < VSumB::NumBatch; b++) {
+                auto vOld = I32LS::load(valueSumOld.group[i][j].data() + b * VSumB::RegWidth);
+                auto vNew = I32Op::add(vOld, vSumGroup[i][j][b]);
+                I32LS::store(valueSumNew.group[i][j].data() + b * VSumB::RegWidth, vNew);
+            }
 }
 
 std::tuple<float, float, float> Mix8Accumulator::evaluateValue(const Mix8Weight &w)
