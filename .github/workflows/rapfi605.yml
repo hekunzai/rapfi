@@ -1,0 +1,145 @@
+名称： Rapfi
+
+在：
+  推送：
+    分行：
+      - 主人
+  拉取请求：
+    分行：
+      - 主人
+
+职位：
+  说唱：
+    名称： ${{ matrix.target.name }}-${{ matrix.arch.name }}
+    运行： ${{ matrix.target.os }}
+    环境：
+      抄送： ${{ matrix.target.c_compiler }}
+      CXX： ${{ matrix.target.cxx_compiler }}
+    策略：
+      矩阵：
+        目标：
+          - {
+              名称：linux-gcc，
+              操作系统： Ubuntu-20.04，
+              c_compiler：GCC，
+              cxx_compiler： g++，
+              cmake_command：“”，
+              shell：“bash {0}”
+            }
+          - {
+              名称：linux-clang，
+              操作系统： Ubuntu-20.04，
+              c_compiler：叮当声，
+              cxx_compiler：咔嚓++，
+              cmake_command：“”，
+              shell：“bash {0}”
+            }
+          - {
+              名称：Windows-GCC，
+              操作系统： windows-latest，
+              c_compiler：GCC，
+              cxx_compiler： g++，
+              cmake_command：“”，
+              msys_sys： 'mingw64'，
+              msys_env：“x86_64”，
+              外壳：“MSYS2 {0}”
+            }
+          - {
+              名称：windows-clang，
+              操作系统： windows-latest，
+              c_compiler：叮当声，
+              cxx_compiler：咔嚓++，
+              cmake_command：“”，
+              msys_sys： 'mingw64'，
+              msys_env：“x86_64”，
+              外壳：“MSYS2 {0}”
+            }
+        拱门：
+          - { name： avx2， cmake_command： “-DUSE_BMI2=OFF -DUSE_AVX2=ON -DUSE_AVX=ON -DUSE_SSE=ON” }
+          - { name： avx， cmake_command： “-DUSE_BMI2=OFF -DUSE_AVX2=OFF -DUSE_AVX=ON -DUSE_SSE=ON” }
+          - { name： sse， cmake_command： “-DUSE_BMI2=OFF -DUSE_AVX2=OFF -DUSE_AVX=OFF -DUSE_SSE=ON” }
+
+    默认值：
+      运行：
+        工作目录：Rapfi
+        外壳： ${{ matrix.target.shell }}
+
+    步骤：
+      - name： 结帐
+        用途：动作/checkout@v3
+        与：
+          提取深度：0
+          子模块：true
+
+      - name：下载所需的 linux 包
+        如果： runner.os == 'Linux'
+        运行： |
+sudo apt 更新
+sudo apt install -y libtbb-dev
+      - name：设置 msys 并安装所需的软件包
+        如果： runner.os == 'Windows'
+        用途：msys2/setup-msys2@v2
+        与：
+          msystem：${{matrix.target.msys_sys}}
+          安装：mingw-w64-${{matrix.target.msys_env}}-${{matrix.target.c_compiler}} mingw-w64-${{matrix.target.msys_env}}-tbb mingw-w64-${{matrix.target.msys_env}}-cmake make git
+
+      - name：从提交历史记录中提取工作台哈希
+        运行： |
+git 日志头 |grep “\b[Bb]ench\s*[a-f0-9]\{8\}” |头 -n 1 |sed “s/\s*[Bb]ench\s*\（[a-f0-9]\{8\}\）.*/\1/g” > git_sig
+[ -s git_sig ] &&echo “commit_bench=$（cat git_sig）” >> $GITHUB_ENV &&echo “参考工作台：” $（cat git_sig） ||echo “找不到长凳”
+      - name： 构建
+        运行： |
+rm -rf build && mkdir build && cd build
+cmake ..-DCMAKE_BUILD_TYPE=发布 ${{ matrix.target.cmake_command }} ${{ matrix.arch.cmake_command }}
+cmake --build 。-j2 && strip pbrain-rapfi*
+MV -v pbrain-rapfi pbrain-rapfi-${{ matrix.target.name }}-${{ matrix.arch.name }}
+      - name：检查工作台签名
+        如果： matrix.arch.name == 'AVX2'
+        运行： |
+cd build && find ../../网络 -mindepth 2 -type f -exec cp {} .\;
+./pbrain-rapfi* 工作台 > bench.txt
+猫bench.txt
+actual_bench=$（grep “哈希” bench.txt | sed “s/[^H]*\sHash：\？\s\（[a-f0-9]\{8\}\）.*/\1/g”）
+if [[ “$actual_bench” ！= “$commit_bench” ]];然后回声“不正确的长凳，得到'$actual_bench'预期'$commit_bench'”&&退出1;FI
+      - name： 上传
+        用途：actions/upload-artifact@v3
+        与：
+          名称： Rapfi
+          路径： Rapfi/build/pbrain-rapfi*
+
+  最鱼的：
+    名称：linux-avx2
+    运行：Ubuntu-20.04
+    环境：
+      CC：叮叮当当
+      CXX：叮叮当当++
+    默认值：
+      运行：
+        工作目录：Rapfi
+
+    步骤：
+      - name： 结帐
+        用途：动作/checkout@v3
+
+      - name： 构建
+        运行： |
+rm -rf build && mkdir build && cd build
+cmake ..-DCMAKE_BUILD_TYPE=释放 -DUSE_BMI2=关闭 -DUSE_AVX2=开 -DUSE_AVX=开 -DUSE_SSE=开 -DNO_COMMAND_MODULES=开
+cmake --build 。-j2 && strip pbrain-rapfi*
+MV -v pbrain-rapfi rapfi-linux-avx2
+      - name： 上传到 fishtest
+        if： ${{ ！contains（github.event.head_commit.message， '已通过'） && ！contains（github.event.head_commit.message， 'skip_fishtest'） }}
+        运行： |
+COMMIT_TITLE=$（echo “${{github.event.head_commit.message}}” | head -n 1）
+curl http://test.pikafish.org/api/add_task -F engine=@build/rapfi-linux-avx2 -F variant=gomoku_freestyle20 -F “task_name=[f20] $COMMIT_TITLE” -F “password=${{secrets.什么都没有}}“ -F ”game_time=10“ -F ”inc_time=0.1“ -F ”深度=-1“ -F ”节点=-1“ -F ”elo0=0“ -F ”elo1=5“ -F ”alpha=0.05“ -F ”beta=0.05”
+睡眠 15
+curl http://test.pikafish.org/api/add_task -F engine=@build/rapfi-linux-avx2 -F variant=gomoku_standard15 -F “task_name=[s15] $COMMIT_TITLE” -F “password=${{secrets.什么都没有}}“ -F ”game_time=10“ -F ”inc_time=0.1“ -F ”深度=-1“ -F ”节点=-1“ -F ”elo0=0“ -F ”elo1=5“ -F ”alpha=0.05“ -F ”beta=0.05”
+睡眠 5
+curl http://test.pikafish.org/api/add_task -F engine=@build/rapfi-linux-avx2 -F variant=gomoku_renju15 -F “task_name=[r15] $COMMIT_TITLE” -F “password=${{secrets.什么都没有}}“ -F ”game_time=10“ -F ”inc_time=0.1“ -F ”深度=-1“ -F ”节点=-1“ -F ”elo0=0“ -F ”elo1=5“ -F ”alpha=0.05“ -F ”beta=0.05”
+      - name： 上传
+        用途：actions/upload-artifact@v3
+        与：
+          名称： Fishtest
+          路径： Rapfi/build/rapfi-linux-avx2
+
+
